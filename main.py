@@ -3,11 +3,10 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
-def prepare_data():
+def prepare_data(hash_rate_smooting_window=10):
 	# Mining hardware data: Extracted manually from multiple sources
 	# Columns: device (string), release_date (date), hashrate (TH/s), power_usage (W/GH), price (USD)
 	mining_hw = pd.read_csv('mining_hw.csv', sep=",", skipinitialspace=True, parse_dates=True, comment="#")
-	mining_hw['release_date'] = mining_hw['release_date'].astype('datetime64[D]')
 
 	# Bitcoin prices, hash rates, and transaction fees: From Blockchain.info on 2019-03-19
 	btc_price = pd.read_csv('market-price.csv', sep=",", skipinitialspace=True, parse_dates=True, names=['date', 'price'])
@@ -15,29 +14,43 @@ def prepare_data():
 	btc_tx_fees = pd.read_csv('transaction-fees.csv', sep=",", skipinitialspace=True, parse_dates=True, names=['date', 'fee'])
 	btc_txs = pd.read_csv('n-transactions.csv', sep=",", skipinitialspace=True, parse_dates=True, names=['date', 'n'])
 
+	mining_hw['release_date'] = mining_hw['release_date'].astype('datetime64[D]')
 	btc_price['date'] = btc_price['date'].astype('datetime64[D]')
 	btc_hashrate['date'] = btc_hashrate['date'].astype('datetime64[D]')
 	btc_tx_fees['date'] = btc_tx_fees['date'].astype('datetime64[D]')
 	btc_txs['date'] = btc_txs['date'].astype('datetime64[D]')
 
 	# Smoothen the hashrate
-	w = 10 # window size
+	w = hash_rate_smooting_window # window size
 	btc_hashrate['smooth'] = btc_hashrate['hashrate'].rolling(w, min_periods=w//2, center=True).mean()
 	# Calculate changes in hash rate
 	btc_hashrate['change'] = btc_hashrate['smooth'].diff()
 	btc_hashrate['change'] = btc_hashrate['change'].fillna(0.0)
 	
 	# Block rewards in USD per block (halvings are hard-coded)
-	conditions = [(btc_price['date'] < pd.to_datetime('2012-11-28 00:00:00')),
-	(btc_price['date'] < pd.to_datetime('2016-07-09 00:00:00')) & (btc_price['date'] >= pd.to_datetime('2012-11-28 00:00:00')),
-	(btc_price['date'] > pd.to_datetime('2016-07-09 00:00:00'))]
-	choices = [50.0, 25.0, 12.5]
-	btc_price['block_reward'] = np.select(conditions, choices, default=0.0)
+	halving = [pd.to_datetime('2012-11-28 00:00:00'), pd.to_datetime('2016-07-09 00:00:00')]
+	conditions = [(btc_price['date'] < halving[0]),
+	(btc_price['date'] < halving[1]) & (btc_price['date'] >= halving[0]),
+	(btc_price['date'] > halving[1])]
+	block_rwd = [50.0, 25.0, 12.5]
+	btc_price['block_reward'] = np.select(conditions, block_rwd, default=0.0)
 	
 	return mining_hw, btc_price, btc_hashrate, btc_tx_fees, btc_txs
 
 
 # Modelling the HW market
+
+def market_share_0(mining_hw, btc_hashrate):
+	# Model 0: Instant switch to new hardware
+	cols = ['date'] + mining_hw['device'].values.tolist()
+	
+	mrkt_shr_hist = []
+	for row in btc_hashrate.itertuples():
+		curr_mrkt_shr = [0.0 for i in range(len(cols)-1)]
+		curr_mrkt_shr[mining_hw[mining_hw['release_date'] < row.date].tail(1).index.tolist()[0]] = row.hashrate
+		mrkt_shr_hist.append([row.date] + curr_mrkt_shr)
+	market_share = pd.DataFrame(mrkt_shr_hist, columns=cols)
+	return market_share
 
 def market_share_1(mining_hw, btc_hashrate):
 	# Model 1: Assuming the new hardware is bought in increasing hash rates and the oldest gets removed in the decreases
