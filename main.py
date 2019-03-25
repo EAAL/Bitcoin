@@ -105,19 +105,57 @@ def market_share_2(mining_hw, btc_hashrate):
 	market_share = pd.DataFrame(mrkt_shr_hist, columns=cols)
 	return market_share
 
-def main():
+def market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_price):
+	# Model 3: Assuming people change gears when their old gear is no longer profitable
 	
+	btc_rev = pd.DataFrame([], columns=['date', 'revenue'])
+	btc_rev['date'] = btc_price['date']
+	btc_rev['revenue'] = btc_price['price']*(6.0*btc_price['block_reward'] + btc_tx_fees['fee']/24.0)
+	
+	cols = ['date'] + mining_hw['device'].values.tolist()
+	
+	rev_per_hashrate = btc_rev['revenue'] / btc_hashrate['smooth']
+	
+	mrkt_shr_hist = []
+	curr_mrkt_shr = np.array([0.0 for i in range(len(cols)-1)])
+	for row in btc_hashrate.itertuples():
+		rev_per_hw = curr_mrkt_shr * rev_per_hashrate[row.Index]
+		cost_per_hw = mining_hw['power_usage'].where(mining_hw['release_date'] <= row.date, 0) * curr_mrkt_shr * electricity_price
+		profit_per_hw = rev_per_hw - cost_per_hw
+		unprofitable = (profit_per_hw <= 0)
+		curr_mrkt_shr[unprofitable] = 0
+		tmp = curr_mrkt_shr.sum()
+		if tmp <= row.smooth:
+			curr_mrkt_shr[mining_hw[mining_hw['release_date'] < row.date].tail(1).index.tolist()[0]] = row.smooth - tmp
+		else:
+			old_ones = mining_hw[mining_hw['release_date'] < row.date].index.tolist()
+			leftover = row.smooth - tmp
+			i = 0
+			while leftover < 0:
+				if curr_mrkt_shr[i] + leftover >= 0:
+					curr_mrkt_shr[i] += leftover
+					leftover = 0
+				else:
+					leftover += curr_mrkt_shr[i]
+					curr_mrkt_shr[i] = 0
+					i += 1
+		mrkt_shr_hist.append([row.date] + curr_mrkt_shr.tolist())
+	market_share = pd.DataFrame(mrkt_shr_hist, columns=cols)
+	return market_share
+
+def main():
+	electricity_price = 0.08 # Price in USD/KWh
 	mining_hw, btc_price, btc_hashrate, btc_tx_fees, btc_txs = prepare_data()
 	
-	market_share = market_share_1(mining_hw, btc_hashrate)
+	#market_share = market_share_1(mining_hw, btc_hashrate)
+	market_share = market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_price)
 	
-	# Revenue in USD per day
+	# Revenue in USD per hour
 	btc_rev = pd.DataFrame([], columns=['date', 'revenue'])
 	btc_rev['date'] = btc_price['date']
 	btc_rev['revenue'] = btc_price['price']*(6.0*btc_price['block_reward'] + btc_tx_fees['fee']/24.0)
 
-	# Cost in USD per day
-	electricity_price = 0.08 # Price in USD/KWh
+	# Cost in USD per hour
 	btc_cost = pd.DataFrame([], columns=['date', 'cost'])
 	btc_cost['date'] = market_share['date']
 	btc_cost['cost'] = (market_share.loc[:, market_share.columns != 'date'].dot(mining_hw['power_usage'].values))*electricity_price
@@ -125,13 +163,16 @@ def main():
 	cost_share = (market_share.loc[:, market_share.columns != 'date']*mining_hw['power_usage'].values)*electricity_price
 
 	fig, ax = plt.subplots()
-	ax.set_yscale('linear')
+	ax.set_yscale('log')
 	y = []
 	for i in cost_share.columns.values:
 		y.append(cost_share[i])
 	ax.stackplot(btc_cost['date'].values, y, labels=cost_share.columns.values)
 	ax.plot(btc_cost['date'], btc_cost['cost'], color='r')
 	ax.plot(btc_rev['date'], btc_rev['revenue'], color='g')
+	ax2 = ax.twinx()
+	ax2.set_yscale('log')
+	ax2.plot(btc_hashrate['date'], btc_hashrate['smooth'], color='b')
 	ax.legend(loc='upper left')
 	plt.grid(True)
 	plt.show()
