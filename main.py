@@ -12,12 +12,14 @@ def prepare_data(hash_rate_smooting_window=10):
 	btc_hashrate = pd.read_csv('hash-rate.csv', sep=",", skipinitialspace=True, parse_dates=True, names=['date', 'hashrate'])
 	btc_tx_fees = pd.read_csv('transaction-fees.csv', sep=",", skipinitialspace=True, parse_dates=True, names=['date', 'fee'])
 	btc_txs = pd.read_csv('n-transactions.csv', sep=",", skipinitialspace=True, parse_dates=True, names=['date', 'n'])
+	btc_difficulty = pd.read_csv('difficulty.csv', sep=",", skipinitialspace=True, parse_dates=True, names=['date', 'difficulty'])
 
 	mining_hw['release_date'] = mining_hw['release_date'].astype('datetime64[D]')
 	btc_price['date'] = btc_price['date'].astype('datetime64[D]')
 	btc_hashrate['date'] = btc_hashrate['date'].astype('datetime64[D]')
 	btc_tx_fees['date'] = btc_tx_fees['date'].astype('datetime64[D]')
 	btc_txs['date'] = btc_txs['date'].astype('datetime64[D]')
+	btc_difficulty['date'] = btc_difficulty['date'].astype('datetime64[D]')
 
 	# Smoothen the hashrate
 	w = hash_rate_smooting_window # window size
@@ -34,7 +36,7 @@ def prepare_data(hash_rate_smooting_window=10):
 	block_rwd = [50.0, 25.0, 12.5]
 	btc_price['block_reward'] = np.select(conditions, block_rwd, default=0.0)
 	
-	return mining_hw, btc_price, btc_hashrate, btc_tx_fees, btc_txs
+	return mining_hw, btc_price, btc_hashrate, btc_tx_fees, btc_txs, btc_difficulty
 
 
 # Modelling the HW market
@@ -126,9 +128,9 @@ def market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_
 		curr_mrkt_shr[unprofitable] = 0
 		tmp = curr_mrkt_shr.sum()
 		if tmp <= row.smooth:
-			curr_mrkt_shr[mining_hw[mining_hw['release_date'] < row.date].tail(1).index.tolist()[0]] = row.smooth - tmp
+			curr_mrkt_shr[mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]] += row.smooth - tmp
 		else:
-			old_ones = mining_hw[mining_hw['release_date'] < row.date].index.tolist()
+			old_ones = mining_hw[mining_hw['release_date'] <= row.date].index.tolist()
 			leftover = row.smooth - tmp
 			i = 0
 			while leftover < 0:
@@ -145,7 +147,7 @@ def market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_
 
 def main():
 	electricity_price = 0.08 # Price in USD/KWh
-	mining_hw, btc_price, btc_hashrate, btc_tx_fees, btc_txs = prepare_data()
+	mining_hw, btc_price, btc_hashrate, btc_tx_fees, btc_txs, btc_difficulty = prepare_data()
 	
 	#market_share = market_share_1(mining_hw, btc_hashrate)
 	market_share = market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_price)
@@ -163,7 +165,7 @@ def main():
 	cost_share = (market_share.loc[:, market_share.columns != 'date']*mining_hw['power_usage'].values)*electricity_price
 
 	fig, ax = plt.subplots()
-	ax.set_yscale('log')
+	ax.set_yscale('linear')
 	y = []
 	for i in cost_share.columns.values:
 		y.append(cost_share[i])
@@ -171,8 +173,13 @@ def main():
 	ax.plot(btc_cost['date'], btc_cost['cost'], color='r')
 	ax.plot(btc_rev['date'], btc_rev['revenue'], color='g')
 	ax2 = ax.twinx()
-	ax2.set_yscale('log')
+	ax2.set_yscale('linear')
 	ax2.plot(btc_hashrate['date'], btc_hashrate['smooth'], color='b')
+	ax3 = ax2.twinx()
+	ax3.set_yscale('linear')
+	ax3.plot(btc_hashrate['date'], btc_difficulty['difficulty'], color='purple')
+	plt.axvline(x=pd.to_datetime('2012-11-28 00:00:00'))
+	plt.axvline(x=pd.to_datetime('2016-07-09 00:00:00'))
 	ax.legend(loc='upper left')
 	plt.grid(True)
 	plt.show()
