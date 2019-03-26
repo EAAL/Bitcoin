@@ -117,7 +117,7 @@ def market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_
 	cols = ['date'] + mining_hw['device'].values.tolist()
 	
 	rev_per_hashrate = btc_rev['revenue'] / btc_hashrate['smooth']
-	
+	test = []
 	mrkt_shr_hist = []
 	curr_mrkt_shr = np.array([0.0 for i in range(len(cols)-1)])
 	for row in btc_hashrate.itertuples():
@@ -130,6 +130,7 @@ def market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_
 		if tmp <= row.smooth:
 			curr_mrkt_shr[mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]] += row.smooth - tmp
 		else:
+			test.append(row.date)
 			old_ones = mining_hw[mining_hw['release_date'] <= row.date].index.tolist()
 			leftover = row.smooth - tmp
 			i = 0
@@ -143,10 +144,11 @@ def market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_
 					i += 1
 		mrkt_shr_hist.append([row.date] + curr_mrkt_shr.tolist())
 	market_share = pd.DataFrame(mrkt_shr_hist, columns=cols)
+	print(len(test))
 	return market_share
 
 def main():
-	electricity_price = 0.08 # Price in USD/KWh
+	electricity_price = 0.07 # Price in USD/KWh
 	mining_hw, btc_price, btc_hashrate, btc_tx_fees, btc_txs, btc_difficulty = prepare_data()
 	
 	#market_share = market_share_1(mining_hw, btc_hashrate)
@@ -165,21 +167,27 @@ def main():
 	cost_share = (market_share.loc[:, market_share.columns != 'date']*mining_hw['power_usage'].values)*electricity_price
 
 	fig, ax = plt.subplots()
+	ax2 = ax.twinx()
 	ax.set_yscale('linear')
+	ax2.set_yscale('linear')
+	
+	ax.set_ylim(0, 2000000)
+	ax2.set_ylim(0, 180000000)
+	
+	ax.set_xlabel("Date")
+	ax.set_ylabel("Cost/Revenue (USD)")
+	ax2.set_ylabel("Hash Rate (TH/s)")
+	
 	y = []
 	for i in cost_share.columns.values:
 		y.append(cost_share[i])
 	ax.stackplot(btc_cost['date'].values, y, labels=cost_share.columns.values)
-	ax.plot(btc_cost['date'], btc_cost['cost'], color='r')
-	ax.plot(btc_rev['date'], btc_rev['revenue'], color='g')
-	ax2 = ax.twinx()
-	ax2.set_yscale('linear')
-	ax2.plot(btc_hashrate['date'], btc_hashrate['smooth'], color='b')
-	ax3 = ax2.twinx()
-	ax3.set_yscale('linear')
-	ax3.plot(btc_hashrate['date'], btc_difficulty['difficulty'], color='purple')
-	plt.axvline(x=pd.to_datetime('2012-11-28 00:00:00'))
-	plt.axvline(x=pd.to_datetime('2016-07-09 00:00:00'))
+	ax.plot(btc_cost['date'], btc_cost['cost'], color='r', label="Cost")
+	ax.plot(btc_rev['date'], btc_rev['revenue'], color='g', label="Revenue")
+	ax2.plot(btc_hashrate['date'], btc_hashrate['smooth'], color='b', label="Total Hash Rate")
+
+	ax.plot(pd.to_datetime('2012-11-28 00:00:00'), -10, color='black', marker='^', label='First havling')
+	ax.plot(pd.to_datetime('2016-07-09 00:00:00'), -10, color='brown', marker='^', label='Secondhalving')
 	ax.legend(loc='upper left')
 	plt.grid(True)
 	plt.show()
