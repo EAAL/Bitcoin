@@ -165,31 +165,35 @@ def main():
 	btc_cost['cost'] = (market_share.loc[:, market_share.columns != 'date'].dot(mining_hw['power_usage'].values))*electricity_price
 
 	cost_share = (market_share.loc[:, market_share.columns != 'date']*mining_hw['power_usage'].values)*electricity_price
+	rev_share = (market_share.loc[:, market_share.columns != 'date'].div(btc_hashrate['smooth'], axis=0)).mul(btc_rev['revenue'], axis=0)
 
-	fig, ax = plt.subplots()
-	ax2 = ax.twinx()
-	ax.set_yscale('linear')
-	ax2.set_yscale('linear')
+	fig, ax = plt.subplots(2, 2, sharex='col', sharey='row')
 	
-	ax.set_ylim(0, 2000000)
-	ax2.set_ylim(0, 180000000)
+	ax[0, 0].plot(btc_cost['date'], btc_cost['cost'], color='r', label="Cost")
+	ax[0, 1].plot(btc_rev['date'], btc_rev['revenue'], color='g', label="Revenue")
 	
-	ax.set_xlabel("Date")
-	ax.set_ylabel("Cost/Revenue (USD)")
-	ax2.set_ylabel("Hash Rate (TH/s)")
+	ax[0, 1].plot(btc_cost['date'], btc_cost['cost'], color='r', label="Cost")
+	ax[0, 0].plot(btc_rev['date'], btc_rev['revenue'], color='g', label="Revenue")	
 	
 	y = []
 	for i in cost_share.columns.values:
 		y.append(cost_share[i])
-	ax.stackplot(btc_cost['date'].values, y, labels=cost_share.columns.values)
-	ax.plot(btc_cost['date'], btc_cost['cost'], color='r', label="Cost")
-	ax.plot(btc_rev['date'], btc_rev['revenue'], color='g', label="Revenue")
-	ax2.plot(btc_hashrate['date'], btc_hashrate['smooth'], color='b', label="Total Hash Rate")
+	ax[0, 0].stackplot(btc_cost['date'].values, y, labels=cost_share.columns.values)
+	ax[0, 0].legend(loc='upper left')
+	
+	y = []
+	for i in rev_share.columns.values:
+		y.append(rev_share[i])
+	ax[0, 1].stackplot(btc_rev['date'].values, y, labels=rev_share.columns.values)
+	ax[0, 1].legend(loc='upper left')
+	
+	ax[1, 0].plot(btc_hashrate['date'], btc_hashrate['smooth'], color='b', label="Total Hash Rate")
+	y2 = []
+	for i in market_share.loc[:, market_share.columns != 'date'].columns.values:
+		y2.append(market_share[i])
+	ax[1, 0].stackplot(btc_hashrate['date'].values, y2, labels=market_share.columns.values[1:])
+	ax[1, 0].legend(loc='upper left')
 
-	ax.plot(pd.to_datetime('2012-11-28 00:00:00'), -10, color='black', marker='^', label='First havling')
-	ax.plot(pd.to_datetime('2016-07-09 00:00:00'), -10, color='brown', marker='^', label='Secondhalving')
-	ax.legend(loc='upper left')
-	plt.grid(True)
 	plt.show()
 
 if __name__ == "__main__":
