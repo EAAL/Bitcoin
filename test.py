@@ -85,7 +85,7 @@ def main():
 	
 	#market_share = market_share_1(mining_hw, btc_hashrate)
 	market_share, e_price = market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_price)
-	print(e_price)
+	print(e_price.loc[(e_price['hashrate'] > 0.5) & (e_price['price'] < 0.35)].describe())
 	
 	# Revenue in USD per hour
 	btc_rev = pd.DataFrame([], columns=['date', 'revenue'])
