@@ -80,13 +80,16 @@ def market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_
 	return market_share, e_price
 
 def main():
-	electricity_price = 0.07 # Price in USD/KWh
 	mining_hw, btc_price, btc_hashrate, btc_tx_fees, btc_txs, btc_difficulty = prepare_data()
+	for electricity_price in np.arange(0.04, 0.12, 0.02):
+		#electricity_price = 0.08 # Price in USD/KWh		
+		#market_share = market_share_1(mining_hw, btc_hashrate)
+		market_share, e_price = market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_price)
+		
+		#print(e_price.loc[(e_price['hashrate'] > 0.5) & (e_price['price'] < 0.35)].describe())
+		print(e_price.loc[e_price['deviceID'] > 2].describe())
 	
-	#market_share = market_share_1(mining_hw, btc_hashrate)
-	market_share, e_price = market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_price)
-	print(e_price.loc[(e_price['hashrate'] > 0.5) & (e_price['price'] < 0.35)].describe())
-	
+	return
 	# Revenue in USD per hour
 	btc_rev = pd.DataFrame([], columns=['date', 'revenue'])
 	btc_rev['date'] = btc_price['date']
@@ -100,32 +103,9 @@ def main():
 	cost_share = (market_share.loc[:, market_share.columns != 'date']*mining_hw['power_usage'].values)*electricity_price
 	rev_share = (market_share.loc[:, market_share.columns != 'date'].div(btc_hashrate['smooth'], axis=0)).mul(btc_rev['revenue'], axis=0)
 
-	fig, ax = plt.subplots(2, 2, sharex='col', sharey='row')
+	fig, ax = plt.subplots()
 	
-	ax[0, 0].plot(btc_cost['date'], btc_cost['cost'], color='r', label="Cost")
-	ax[0, 1].plot(btc_rev['date'], btc_rev['revenue'], color='g', label="Revenue")
-	
-	ax[0, 1].plot(btc_cost['date'], btc_cost['cost'], color='r', label="Cost")
-	ax[0, 0].plot(btc_rev['date'], btc_rev['revenue'], color='g', label="Revenue")	
-	
-	y = []
-	for i in cost_share.columns.values:
-		y.append(cost_share[i])
-	ax[0, 0].stackplot(btc_cost['date'].values, y, labels=cost_share.columns.values)
-	ax[0, 0].legend(loc='upper left')
-	
-	y = []
-	for i in rev_share.columns.values:
-		y.append(rev_share[i])
-	ax[0, 1].stackplot(btc_rev['date'].values, y, labels=rev_share.columns.values)
-	ax[0, 1].legend(loc='upper left')
-	
-	ax[1, 0].plot(btc_hashrate['date'], btc_hashrate['smooth'], color='b', label="Total Hash Rate")
-	y2 = []
-	for i in market_share.loc[:, market_share.columns != 'date'].columns.values:
-		y2.append(market_share[i])
-	ax[1, 0].stackplot(btc_hashrate['date'].values, y2, labels=market_share.columns.values[1:])
-	ax[1, 0].legend(loc='upper left')
+	ax.hist(e_price.loc[e_price['deviceID'] > 2].price, 500, weights=e_price.loc[e_price['deviceID'] > 2].hashrate)
 
 	plt.show()
 
