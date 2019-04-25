@@ -66,30 +66,33 @@ def market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_
 			i = 0
 			while leftover < 0:
 				if curr_mrkt_shr[i] + leftover >= 0:
-					test.append([i, rev_per_hashrate[row.Index]/mining_hw['power_usage'][i], -leftover])
+					test.append([row.date, i, rev_per_hashrate[row.Index]/mining_hw['power_usage'][i], -leftover, -leftover/row.smooth])
 					curr_mrkt_shr[i] += leftover
 					leftover = 0
 				elif curr_mrkt_shr[i] > 0:
-					test.append([i, rev_per_hashrate[row.Index]/mining_hw['power_usage'][i], curr_mrkt_shr[i]])
+					test.append([row.date, i, rev_per_hashrate[row.Index]/mining_hw['power_usage'][i], curr_mrkt_shr[i], curr_mrkt_shr[i]/row.smooth])
 					leftover += curr_mrkt_shr[i]
 					curr_mrkt_shr[i] = 0
 				i += 1
 		mrkt_shr_hist.append([row.date] + curr_mrkt_shr.tolist())
 	market_share = pd.DataFrame(mrkt_shr_hist, columns=cols)
-	e_price = pd.DataFrame(test, columns=['deviceID', 'price', 'hashrate'])
-	return market_share, e_price
+	e_price = pd.DataFrame(test, columns=['date', 'deviceID', 'price', 'hashrate', 'hratio'])
+	return market_share, e_price, rev_per_hashrate
 
 def main():
 	mining_hw, btc_price, btc_hashrate, btc_tx_fees, btc_txs, btc_difficulty = prepare_data()
-	for electricity_price in np.arange(0.04, 0.12, 0.02):
-		#electricity_price = 0.08 # Price in USD/KWh		
-		#market_share = market_share_1(mining_hw, btc_hashrate)
-		market_share, e_price = market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_price)
-		
-		#print(e_price.loc[(e_price['hashrate'] > 0.5) & (e_price['price'] < 0.35)].describe())
-		print(e_price.loc[e_price['deviceID'] > 2].describe())
+	electricity_price = 0.04 # Price in USD/KWh		
+	#market_share = market_share_1(mining_hw, btc_hashrate)
+	market_share, e_price, rev_per_hashrate = market_share_3(mining_hw, btc_hashrate, btc_price, btc_tx_fees, electricity_price)
 	
-	return
+	#print(e_price.loc[(e_price['hashrate'] > 0.5) & (e_price['price'] < 0.35)].describe())
+	tmp = e_price.loc[e_price['deviceID'] > 2]
+	print(tmp.describe())
+	bins = np.array([0.04, 0.08, 0.10, 0.12, 0.14, 1.6])
+	x = pd.cut(tmp['price'], bins)
+	print(tmp.groupby(x).mean())
+	print(tmp.groupby('deviceID').mean())
+
 	# Revenue in USD per hour
 	btc_rev = pd.DataFrame([], columns=['date', 'revenue'])
 	btc_rev['date'] = btc_price['date']
@@ -104,9 +107,9 @@ def main():
 	rev_share = (market_share.loc[:, market_share.columns != 'date'].div(btc_hashrate['smooth'], axis=0)).mul(btc_rev['revenue'], axis=0)
 
 	fig, ax = plt.subplots()
-	
-	ax.hist(e_price.loc[e_price['deviceID'] > 2].price, 500, weights=e_price.loc[e_price['deviceID'] > 2].hashrate)
-
+	ax.set_yscale('log')
+	#ax.hist(e_price.loc[e_price['deviceID'] > 2].price, 500, weights=e_price.loc[e_price['deviceID'] > 2].hashrate)
+	ax.plot(btc_hashrate['date'].values, rev_per_hashrate)
 	plt.show()
 
 if __name__ == "__main__":
