@@ -61,7 +61,8 @@ def hashrate_share(mining_hw, btc, threshold):
 		
 		blocks = 144 * 600 * (tmp * 1e12 / row.difficulty) / 2**32
 		
-		if np.abs(blocks - row.block_count_avg) > threshold:
+		#if np.abs(blocks - row.block_count_avg) > threshold:
+		if row.change_in_hw:
 			if tmp < row.hashrate: # Buy new hardware
 				curr_mrkt_shr[mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]] += row.hashrate - tmp
 			else: # Turn off old hardware
@@ -84,6 +85,28 @@ def hashrate_share(mining_hw, btc, threshold):
 			if tmp == row.hashrate:
 				tmp -= 0.1
 			conf.append([row.date] + [100000.0/(np.abs(tmp - row.hashrate))])
+		tmp = curr_mrkt_shr.sum()
+		blocks = (144 * 600 * 1e12 / 2**32) * (tmp / row.difficulty)
+		if np.abs(blocks - row.block_count_avg) > threshold:
+			if tmp < row.hashrate: # Buy new hardware
+				curr_mrkt_shr[mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]] += row.hashrate - tmp
+			else: # Turn off old hardware
+				old_ones = mining_hw[mining_hw['release_date'] <= row.date].index.tolist()
+				leftover = row.hashrate - tmp
+				i = 0
+				while leftover < 0:
+					if curr_mrkt_shr[i] == 0:
+						i += 1
+						continue
+					if curr_mrkt_shr[i] + leftover >= 0:
+						rmv.append([row.date, i, -leftover])
+						curr_mrkt_shr[i] += leftover
+						leftover = 0
+					else:
+						rmv.append([row.date, i, curr_mrkt_shr[i]])
+						leftover += curr_mrkt_shr[i]
+						curr_mrkt_shr[i] = 0
+						i += 1
 		mrkt_shr_hist.append([row.date] + curr_mrkt_shr.tolist())
 	turned_off = pd.DataFrame(rmv, columns=['date', 'deviceID', 'hashrate'])
 	confidence = pd.DataFrame(conf, columns=['date', 'conf'])
@@ -109,13 +132,14 @@ def main():
 	
 	electricity_prices = []
 	for row in turned_off.itertuples():
-		power_saved = mining_hw['power_usage'][row.deviceID]*row.hashrate
-		money_not_earned = row.hashrate*btc[btc['date'] == row.date]['rev_per_hashrate'].values[0]
+		power_saved = mining_hw['power_usage'][row.deviceID]
+		money_not_earned = btc[btc['date'] == row.date]['rev_per_hashrate'].values[0]
 		electricity_prices.append((row.date, row.deviceID, row.hashrate, money_not_earned / power_saved))
 	
 	e_price = pd.DataFrame(electricity_prices, columns=['date', 'deviceID', 'hashrate', 'price'])
 	
-	print(e_price[e_price['price'] == 0])
+	plt.plot(e_price['date'].values, e_price['price'])
+	plt.show()
 	
 	percentage = market_share.loc[:, market_share.columns != 'date'].div(btc['hashrate'], axis=0)
 	
