@@ -138,24 +138,14 @@ def main():
 	
 	e_price = pd.DataFrame(electricity_prices, columns=['date', 'deviceID', 'hashrate', 'price'])
 	
-	plt.plot(e_price['date'].values, e_price['price'])
-	plt.show()
-	
-	percentage = market_share.loc[:, market_share.columns != 'date'].div(btc['hashrate'], axis=0)
-	
-	y = []
-	for i in market_share.loc[:, market_share.columns != 'date'].columns.values:
-		y.append(market_share[i])
-
-#	y = []
-#	for i in percentage.columns.values:
-#		y.append(percentage[i])
 	fig, ax = plt.subplots()
 	ax.set_yscale('log')
-	ax.plot(btc['date'].values, btc['hashrate'])
-	ax.stackplot(btc['date'].values, y, labels=market_share.columns[1:].values)
-	ax.legend(loc='upper left')
+	ax.scatter(e_price['date'].values, e_price['price'])
+	ax.axhline(y=0.08, color='r')
+	ax.axhline(y=0.12, color='r')
 	plt.show()
+	
+
 
 if __name__ == "__main__":
 	main()

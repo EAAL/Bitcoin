@@ -145,7 +145,8 @@ def main():
 	ax2 = ax1.twinx()
 	ax1.plot(btc['date'].values, btc['price'], color='g')
 	ax2.plot(btc['date'].values, btc['difficulty'])
-	for i in e_price[e_price['price'] > 0.6]['date']:
+	ax2.plot(btc['date'].values, btc['hashrate'], color='orange')
+	for i in e_price[(e_price['price'] > 0.6) & (e_price['hashrate'] > 1000)]['date']:
 		ax1.axvline(x=i, color='r')
 	plt.show()
 	
