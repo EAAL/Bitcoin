@@ -51,6 +51,7 @@ def hashrate_share(mining_hw, btc, threshold):
 	mrkt_shr_hist = []
 	conf = []
 	rmv = []
+	nhw = []
 	curr_mrkt_shr = np.array([0.0 for i in range(len(cols)-1)])
 
 	for row in btc.itertuples():
@@ -67,7 +68,9 @@ def hashrate_share(mining_hw, btc, threshold):
 		#if np.abs(blocks - row.block_count_avg) > threshold:
 		if row.change_in_hw:
 			if tmp < row.hashrate: # Buy new hardware
-				curr_mrkt_shr[mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]] += row.hashrate - tmp
+				hw_type = mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]
+				curr_mrkt_shr[hw_type] += row.hashrate - tmp
+				nhw.append([row.date, hw_type, row.hashrate - tmp])
 			else: # Turn off old hardware
 				old_ones = mining_hw[mining_hw['release_date'] <= row.date].index.tolist()
 				leftover = row.hashrate - tmp
@@ -92,7 +95,9 @@ def hashrate_share(mining_hw, btc, threshold):
 		blocks = (144 * 600 * 1e12 / 2**32) * (tmp / row.difficulty)
 		if np.abs(blocks - row.block_count_avg) > threshold:
 			if tmp < row.hashrate: # Buy new hardware
-				curr_mrkt_shr[mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]] += row.hashrate - tmp
+				hw_type = mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]
+				curr_mrkt_shr[hw_type] += row.hashrate - tmp
+				nhw.append([row.date, hw_type, row.hashrate - tmp])
 			else: # Turn off old hardware
 				old_ones = mining_hw[mining_hw['release_date'] <= row.date].index.tolist()
 				leftover = row.hashrate - tmp
@@ -115,7 +120,8 @@ def hashrate_share(mining_hw, btc, threshold):
 	turned_off = pd.DataFrame(rmv, columns=['date', 'deviceID', 'hashrate'])
 	confidence = pd.DataFrame(conf, columns=['date', 'conf'])
 	market_share = pd.DataFrame(mrkt_shr_hist, columns=cols)
-	return market_share, confidence, turned_off
+	new_hw = pd.DataFrame(nhw, columns=['date', 'deviceID', 'hashrate'])
+	return market_share, confidence, turned_off, new_hw
 
 def main():
 	mining_hw, btc = prepare_data()
@@ -131,7 +137,7 @@ def main():
 	# Revenue in USD per hour
 	btc['revenue'] = btc['price']*((btc['block_count']/24.0)*btc['block_reward'] + btc['tx_fee']/24.0)
 
-	market_share, confidence, turned_off = hashrate_share(mining_hw, btc, threshold)
+	market_share, confidence, turned_off, new_hw = hashrate_share(mining_hw, btc, threshold)
 	
 	electricity_prices = []
 	for row in turned_off.itertuples():
@@ -141,6 +147,14 @@ def main():
 	
 	e_price = pd.DataFrame(electricity_prices, columns=['date', 'deviceID', 'hashrate', 'price'])
 	
+	electricity_prices = []
+	for row in new_hw.itertuples():
+		power_used = mining_hw['power_usage'][row.deviceID]
+		money_earned = btc[btc['date'] == row.date]['rev_per_hashrate'].values[0]
+		electricity_prices.append((row.date, row.deviceID, row.hashrate, money_earned / power_used))
+	
+	ep = pd.DataFrame(electricity_prices, columns=['date', 'deviceID', 'hashrate', 'price'])
+	
 	fig, ax1 = plt.subplots()
 	ax2 = ax1.twinx()
 	ax1.plot(btc['date'].values, btc['price'], color='g')
@@ -148,6 +162,8 @@ def main():
 	ax2.plot(btc['date'].values, btc['hashrate'], color='orange')
 	for i in e_price[(e_price['price'] > 0.6) & (e_price['hashrate'] > 1000)]['date']:
 		ax1.axvline(x=i, color='r')
+	for i in ep[(ep['hashrate'] > 1e6)]['date']:
+		ax1.axvline(x=i, color='gray')
 	plt.show()
 	
 	percentage = market_share.loc[:, market_share.columns != 'date'].div(btc['hashrate'], axis=0)
