@@ -1,3 +1,4 @@
+from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import pandas as pd
 from scipy.stats import norm, poisson
@@ -91,30 +92,7 @@ def hashrate_share(mining_hw, btc, threshold):
 			if tmp == row.hashrate:
 				tmp -= 0.1
 			conf.append([row.date] + [100000.0/(np.abs(tmp - row.hashrate))])
-		tmp = curr_mrkt_shr.sum()
-		blocks = (144 * 600 * 1e12 / 2**32) * (tmp / row.difficulty)
-		if np.abs(blocks - row.block_count_avg) > threshold:
-			if tmp < row.hashrate: # Buy new hardware
-				hw_type = mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]
-				curr_mrkt_shr[hw_type] += row.hashrate - tmp
-				nhw.append([row.date, hw_type, row.hashrate - tmp])
-			else: # Turn off old hardware
-				old_ones = mining_hw[mining_hw['release_date'] <= row.date].index.tolist()
-				leftover = row.hashrate - tmp
-				i = 0
-				while leftover < 0:
-					if curr_mrkt_shr[i] == 0:
-						i += 1
-						continue
-					if curr_mrkt_shr[i] + leftover >= 0:
-						rmv.append([row.date, i, -leftover])
-						curr_mrkt_shr[i] += leftover
-						leftover = 0
-					else:
-						rmv.append([row.date, i, curr_mrkt_shr[i]])
-						leftover += curr_mrkt_shr[i]
-						curr_mrkt_shr[i] = 0
-						i += 1
+
 		curr_mrkt_shr[curr_mrkt_shr < 1e-12] = 0
 		mrkt_shr_hist.append([row.date] + curr_mrkt_shr.tolist())
 	turned_off = pd.DataFrame(rmv, columns=['date', 'deviceID', 'hashrate'])
@@ -145,8 +123,13 @@ def main():
 		money_not_earned = btc[btc['date'] == row.date]['rev_per_hashrate'].values[0]
 		electricity_prices.append((row.date, row.deviceID, row.hashrate, money_not_earned / power_saved))
 	
-	e_price = pd.DataFrame(electricity_prices, columns=['date', 'deviceID', 'hashrate', 'price'])
+	w=3
 	
+	e_price = pd.DataFrame(electricity_prices, columns=['date', 'deviceID', 'hashrate', 'price'])
+	e_price['sparsity'] = e_price['date'].diff()/np.timedelta64(1, 'D')
+	e_price['sparsity'] = e_price['sparsity'].fillna(1)
+	e_price['sparsity'] = e_price['sparsity'].rolling(w, min_periods=w//2, center=True).mean()
+		
 	electricity_prices = []
 	for row in new_hw.itertuples():
 		power_used = mining_hw['power_usage'][row.deviceID]
@@ -154,35 +137,13 @@ def main():
 		electricity_prices.append((row.date, row.deviceID, row.hashrate, money_earned / power_used))
 	
 	ep = pd.DataFrame(electricity_prices, columns=['date', 'deviceID', 'hashrate', 'price'])
+	ep['sparsity'] = ep['date'].diff()/np.timedelta64(1, 'D')
+	ep['sparsity'] = ep['sparsity'].fillna(1)
+	ep['sparsity'] = ep['sparsity'].rolling(w, min_periods=w//2, center=True).mean()
 	
-	fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-	ax3 = ax1.twinx()
-	ax1.plot(btc['date'].values, btc['price'], color='g')
-	ax3.plot(btc['date'].values, btc['hashrate'], color='orange')
-	for i in e_price['date']:
-		ax1.axvline(x=i, color='r')
-		ax2.axvline(x=i, color='r')
-	for i in ep['date']:
-		ax1.axvline(x=i, color='gray')
-		ax2.axvline(x=i, color='gray')
-	ax2.plot(btc['date'].values, btc['difficulty'])
-	plt.show()
-	
-	percentage = market_share.loc[:, market_share.columns != 'date'].div(btc['hashrate'], axis=0)
-	
-	y = []
-	for i in market_share.loc[:, market_share.columns != 'date'].columns.values:
-		y.append(market_share[i])
+	print(e_price['date'].count() / btc['date'].count(), ep['date'].count() / btc['date'].count())
+	print(e_price[e_price['price'] == 0])
 
-#	y = []
-#	for i in percentage.columns.values:
-#		y.append(percentage[i])
-	fig, ax = plt.subplots()
-	ax.set_yscale('linear')
-	ax.plot(btc['date'].values, btc['hashrate'])
-	ax.stackplot(btc['date'].values, y, labels=market_share.columns[1:].values)
-	ax.legend(loc='upper left')
-	plt.show()
 
 if __name__ == "__main__":
 	main()
