@@ -53,21 +53,26 @@ def hashrate_share(mining_hw, btc, threshold):
 	rmv = []
 	nhw = []
 	curr_mrkt_shr = np.array([0.0 for i in range(len(cols)-1)])
+	idle = np.array([0.0 for i in range(len(cols)-1)])
 
 	for row in btc.itertuples():
 		rev_per_hw = curr_mrkt_shr * row.rev_per_hashrate
-		profitable_prices = mining_hw['power_usage'] / row.rev_per_hashrate
+		profitable_prices = row.rev_per_hashrate / mining_hw['power_usage']
 		nonprofitable_hws = profitable_prices < 0.01
 		curr_mrkt_shr[nonprofitable_hws] = curr_mrkt_shr[nonprofitable_hws] * 0.7
+		curr_mrkt_shr[curr_mrkt_shr < 1e-12] = 0
 		curr_used = np.nonzero(curr_mrkt_shr)
 		curr_mrkt_shr[curr_used] = curr_mrkt_shr[curr_used] * everyday_reduction
-		tmp = curr_mrkt_shr.sum()
-		
-		blocks = 144 * 600 * (tmp * 1e12 / row.difficulty) / 2**32
 		
 		#if np.abs(blocks - row.block_count_avg) > threshold:
 		if row.change_in_hw:
 			if 0 < row.change: # Buy new hardware
+				if idle.sum() < row.change:
+					curr_mrkt_shr = curr_mrkt_shr + idle
+					idle = np.array([0.0 for i in range(len(cols)-1)])
+				else:
+					curr_mrkt_shr = curr_mrkt_shr + ((row.change / idle.sum()) * idle)
+					idle = idle * (row.change / idle.sum())
 				hw_type = mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]
 				ch = row.hashrate - row.hashrate_avg
 				curr_mrkt_shr[hw_type] += ch
@@ -76,20 +81,52 @@ def hashrate_share(mining_hw, btc, threshold):
 				old_ones = mining_hw[mining_hw['release_date'] <= row.date].index.tolist()
 				leftover = row.hashrate - row.hashrate_avg
 				i = 0
-				while leftover < 0 and i < len(curr_mrkt_shr):
+				while leftover < 0 and i < len(old_ones)-1:
 					if curr_mrkt_shr[i] == 0:
 						i += 1
 						continue
 					if curr_mrkt_shr[i] + leftover >= 0:
-						rmv.append([row.date, i, -leftover])
+						if profitable_prices[i] < 0.08:
+							idle[i] -= leftover
+						else:
+							rmv.append([row.date, i, -leftover])
 						curr_mrkt_shr[i] += leftover
 						leftover = 0
 					else:
-						rmv.append([row.date, i, curr_mrkt_shr[i]])
+						if profitable_prices[i] < 0.08:
+							idle[i] += curr_mrkt_shr[i]
+						else:
+							rmv.append([row.date, i, curr_mrkt_shr[i]])
 						leftover += curr_mrkt_shr[i]
 						curr_mrkt_shr[i] = 0
 						i += 1
-
+		tmp = curr_mrkt_shr.sum()
+		blocks = 144 * 600 * (tmp * 1e12 / row.difficulty) / 2**32
+		if blocks < row.block_count_avg - threshold:
+			curr_mrkt_shr = curr_mrkt_shr + idle
+			idle = np.array([0.0 for i in range(len(cols)-1)])
+			tmp = curr_mrkt_shr.sum()
+			if tmp < row.hashrate:
+				hw_type = mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]
+				curr_mrkt_shr[hw_type] += row.hashrate - tmp
+		elif blocks > row.block_count_avg + threshold:
+			leftover = row.hashrate - tmp
+			i = 0
+			while leftover < 0 and i < len(curr_mrkt_shr):
+				if curr_mrkt_shr[i] == 0:
+					i += 1
+					continue
+#				if row.rev_per_hashrate / mining_hw['power_usage'][i] > 0.2:
+#					print(row.date, row.rev_per_hashrate / mining_hw['power_usage'][i])
+				if curr_mrkt_shr[i] + leftover >= 0:
+					idle[i] -= leftover
+					curr_mrkt_shr[i] += leftover
+					leftover = 0
+				else:
+					idle[i] += curr_mrkt_shr[i]
+					leftover += curr_mrkt_shr[i]
+					curr_mrkt_shr[i] = 0
+					i += 1
 		curr_mrkt_shr[curr_mrkt_shr < 1e-12] = 0
 		mrkt_shr_hist.append([row.date] + curr_mrkt_shr.tolist())
 	turned_off = pd.DataFrame(rmv, columns=['date', 'deviceID', 'hashrate'])
@@ -115,50 +152,19 @@ def main():
 	
 	market_share, confidence, turned_off, new_hw = hashrate_share(mining_hw, btc, threshold)
 	
-	electricity_prices = []
-	for row in turned_off.itertuples():
-		power_saved = mining_hw['power_usage'][row.deviceID]
-		money_not_earned = btc[btc['date'] == row.date]['rev_per_hashrate'].values[0]
-		electricity_prices.append((row.date, row.deviceID, row.hashrate, money_not_earned / power_saved))
-	
-	w=5
-	
-	e_price = pd.DataFrame(electricity_prices, columns=['date', 'deviceID', 'hashrate', 'price'])
-	e_price['sparsity'] = e_price['date'].diff()/np.timedelta64(1, 'D')
-	e_price['sparsity'] = e_price['sparsity'].fillna(1)
-	e_price['sparsity'] = e_price['sparsity'].rolling(w, min_periods=w//2, center=True).mean()
-	
-	x = pd.DataFrame(btc[btc['date'].isin(turned_off['date'])]['rev_per_hashrate']).T
-	y = pd.DataFrame(mining_hw['power_usage'])
-
+	electricity_used = market_share.loc[:, market_share.columns != 'date'] * mining_hw['power_usage'].values
+	print(electricity_used.sum(axis=1))
 	fig, ax = plt.subplots()
-	z = y.values.dot(x.values)
-	z[np.isnan(z)] = 0
-	j = 1
-	for i in z:
-		ax.scatter(btc[btc['date'].isin(turned_off['date'])]['date'].values, i, s=5, c='r')
-		j += 1
+	
+	y2 = []
+	for i in electricity_used.columns.values:
+		y2.append(electricity_used[i])
+	ax.stackplot(btc['date'].values, y2, labels=market_share.columns.values[1:])
+	ax.legend(loc='upper left')
+	plt.xlabel('date')
+	plt.ylabel('electricity usage (KWh)')
+	ax.grid(True)
 	plt.show()
-	
-	electricity_prices = []
-	for row in new_hw.itertuples():
-		power_used = mining_hw['power_usage'][row.deviceID]
-		money_earned = btc[btc['date'] == row.date]['rev_per_hashrate'].values[0]
-		electricity_prices.append((row.date, row.deviceID, row.hashrate, money_earned / power_used))
-	
-	ep = pd.DataFrame(electricity_prices, columns=['date', 'deviceID', 'hashrate', 'price'])
-	ep['sparsity'] = ep['date'].diff()/np.timedelta64(1, 'D')
-	ep['sparsity'] = ep['sparsity'].fillna(1)
-	ep['sparsity'] = ep['sparsity'].rolling(w, min_periods=w//2, center=True).mean()
-	
-	print(e_price['date'].count() / btc['date'].count(), ep['date'].count() / btc['date'].count())
-	checking = e_price[e_price['price'] > 1]['date']
-	print(e_price[e_price['price'] > 1][['date', 'deviceID', 'price']])
-	print(btc[btc['date'].isin(checking.values)][['date', 'price', 'hashrate', 'rev_per_hashrate', 'change', 'block_count', 'block_count_avg']])
-
-	checking = ep[(ep['price'] < 0.08) & (ep['price'] >= 0)]['date']
-	print(ep[(ep['price'] < 0.08) & (ep['price'] >= 0)][['date', 'deviceID', 'price']])
-	print(btc[btc['date'].isin(checking.values)][['date', 'price', 'hashrate', 'rev_per_hashrate', 'change', 'block_count', 'block_count_avg']])
 
 if __name__ == "__main__":
 	main()
