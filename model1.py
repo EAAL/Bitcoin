@@ -48,25 +48,33 @@ def model(btc, mining_hw):
 	ms = []
 	new_hw = []
 	old_hw = []
+	on_again = []
 	curr_mrkt_shr = np.array([0.0 for i in mining_hw['device'].values])
 	storage = np.array([0.0 for i in mining_hw['device'].values])
 	for row in btc.itertuples():
 		hashrate_change = ((row.dif_change * row.block_count_smooth) / (144 * 600 * 1e12 / 2**32) + row.smooth_hashrate_diff) / 2.0
 		if hashrate_change > 0:
-			#TODO add condition to check if it is profitable to turn on this hardware
 			leftover = hashrate_change
 			i = len(curr_mrkt_shr) - 1
 			while leftover > 0 and i >= 0:
-				if row.rev_per_hashrate / mining_hw.iloc[i]['power_usage'] < 0.04:
+				if len(old_hw) == 0:
 					break
+
+				if row.rev_per_hashrate / mining_hw.iloc[i]['power_usage'] < 0.08:
+					i -= 1
+					continue
 				if storage[i] == 0:
 					i -= 1
 					continue
 				if storage[i] - leftover >= 0:
+					if leftover / mining_hw.iloc[i]['hashrate'] > bulk_threshold:
+						on_again.append([row.date, i, leftover])
 					curr_mrkt_shr[i] += leftover
 					storage[i] -= leftover
 					leftover = 0
 				else:
+					if storage[i] / mining_hw.iloc[i]['hashrate'] > bulk_threshold:
+						on_again.append([row.date, i, storage[i]])
 					leftover -= storage[i]
 					curr_mrkt_shr[i] += storage[i]
 					storage[i] = 0
@@ -101,7 +109,7 @@ def model(btc, mining_hw):
 					i += 1
 		ms.append([row.date] + curr_mrkt_shr.tolist())
 	market_share = pd.DataFrame(ms, columns=['date'] + mining_hw['device'].values.tolist())
-	return market_share, new_hw, old_hw
+	return market_share, new_hw, old_hw, on_again
 
 def main():
 	mining_hw, btc = prepare_data()
@@ -122,20 +130,27 @@ def main():
 	btc['revenue'] = btc['price']*((btc['block_count']/24.0)*btc['block_reward'] + btc['tx_fee']/24.0)
 	btc['rev_per_hashrate'] = btc['revenue'] / btc['hashrate']
 	
-	market_share, new_hw, old_hw = model(btc, mining_hw)
+	market_share, new_hw, old_hw, on_again = model(btc, mining_hw)
 	
 	bought = pd.DataFrame(new_hw, columns=['date', 'device', 'hashrate'])
 	b2 = pd.merge(btc[['date', 'rev_per_hashrate']], bought[['date', 'device']])
 	b3 = pd.merge(b2[['device']], mining_hw[['power_usage']], how='left', left_on='device', right_index=True)
 	b2['prof_price'] = b2['rev_per_hashrate']/b3['power_usage']
+	
 	sold = pd.DataFrame(old_hw, columns=['date', 'device', 'hashrate'])
 	s2 = pd.merge(btc[['date', 'rev_per_hashrate']], sold[['date', 'device']])
 	s3 = pd.merge(s2[['device']], mining_hw[['power_usage']], how='left', left_on='device', right_index=True)
 	s2['prof_price'] = s2['rev_per_hashrate']/s3['power_usage']
 	
+	reuse = pd.DataFrame(on_again, columns=['date', 'device', 'hashrate'])
+	r2 = pd.merge(btc[['date', 'rev_per_hashrate']], reuse[['date', 'device']])
+	r3 = pd.merge(r2[['device']], mining_hw[['power_usage']], how='left', left_on='device', right_index=True)
+	r2['prof_price'] = r2['rev_per_hashrate']/r3['power_usage']
+	
 	fig, ax = plt.subplots()
 	ax.scatter(s2['date'].values, s2['prof_price'].values, c='r')
 	ax.scatter(b2['date'].values, b2['prof_price'].values, c='g')
+	ax.scatter(r2['date'].values, r2['prof_price'].values, c='b')
 	plt.show()
 	
 	y = []
@@ -159,6 +174,10 @@ def main():
 	print('Selling')
 	print(s2['date'].count()/btc['date'].count())
 	print(s2.describe())
+	
+	fig, ax = plt.subplots()
+	ax.hist(s2['prof_price'].values, bins=50)
+	plt.show()
 
 if __name__ == "__main__":
 	main()
