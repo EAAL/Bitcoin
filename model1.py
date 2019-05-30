@@ -41,29 +41,48 @@ def prepare_data():
 	btc = btc.replace({'difficulty': 0}, 1e-12)
 	btc = btc.loc[:, ~btc.columns.duplicated()]
 
-	return mining_hw, btc
+	h = np.array(mining_hw['hashrate'].tolist())
+	e = np.array(mining_hw['power_usage'].tolist())
+	price = np.array(mining_hw['price'].tolist()) / h
 
-def model(btc, mining_hw):
-	bulk_threshold = 5000
+	N = len(mining_hw.index)
+
+	break_even = []
+	for i in range(1, N):
+		tmp = []
+		for j in range(i):
+			d = int(price[i]*h[j]/((e[j]-e[i])*24))
+			tmp.append(d)
+		break_even.append(tmp)
+
+	return mining_hw, btc, break_even
+
+def model(btc, mining_hw, break_even):
+	bulk_threshold = 10000
 	ms = []
 	new_hw = []
 	old_hw = []
 	on_again = []
 	curr_mrkt_shr = np.array([0.0 for i in mining_hw['device'].values])
 	storage = np.array([0.0 for i in mining_hw['device'].values])
+	avg_e_price = np.array([0.0 for i in mining_hw['device'].values])
 	for row in btc.itertuples():
 		hashrate_change = ((row.dif_change * row.block_count_smooth) / (144 * 600 * 1e12 / 2**32) + row.smooth_hashrate_diff) / 2.0
 		if hashrate_change > 0:
 			leftover = hashrate_change
-			i = len(curr_mrkt_shr) - 1
+			newest = mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]
+			i = newest-1
 			while leftover > 0 and i >= 0:
 				if len(old_hw) == 0:
 					break
 
-				if row.rev_per_hashrate / mining_hw.iloc[i]['power_usage'] < 0.08:
+				if storage[i] == 0:
 					i -= 1
 					continue
-				if storage[i] == 0:
+				
+				elec_price = avg_e_price[i]
+					
+				if (newest > 0) and (elec_price > 0) and (np.abs(break_even[newest-1][i] / elec_price) < 90):
 					i -= 1
 					continue
 				if storage[i] - leftover >= 0:
@@ -89,30 +108,36 @@ def model(btc, mining_hw):
 		else:
 			hashrate_change *= -1
 			leftover = -hashrate_change
+			newest = mining_hw[mining_hw['release_date'] <= row.date].tail(1).index.tolist()[0]
 			i = 0
 			while leftover < 0 and i < len(curr_mrkt_shr):
 				if curr_mrkt_shr[i] == 0:
 					i += 1
 					continue
+				
+				elec_price = row.rev_per_hashrate / mining_hw.iloc[i]['power_usage']
+				
 				if curr_mrkt_shr[i] + leftover >= 0:
-					if hashrate_change / mining_hw.iloc[i]['hashrate'] > bulk_threshold:
-						old_hw.append([row.date, i, hashrate_change])
+					if (-leftover) / mining_hw.iloc[i]['hashrate'] > bulk_threshold:
+						old_hw.append([row.date, i, -leftover])
 					curr_mrkt_shr[i] += leftover
+					avg_e_price[i] = (avg_e_price[i]*storage[i] + elec_price*(-leftover))/(storage[i]-leftover)
 					storage[i] -= leftover
 					leftover = 0
 				else:
-					if hashrate_change / mining_hw.iloc[i]['hashrate'] > bulk_threshold:
-						old_hw.append([row.date, i, hashrate_change])
+					if curr_mrkt_shr[i] / mining_hw.iloc[i]['hashrate'] > bulk_threshold:
+						old_hw.append([row.date, i, curr_mrkt_shr[i]])
 					leftover += curr_mrkt_shr[i]
+					avg_e_price[i] = (avg_e_price[i]*storage[i] + elec_price*curr_mrkt_shr[i])/(storage[i]+curr_mrkt_shr[i])
 					storage[i] += curr_mrkt_shr[i]
 					curr_mrkt_shr[i] = 0
 					i += 1
 		ms.append([row.date] + curr_mrkt_shr.tolist())
 	market_share = pd.DataFrame(ms, columns=['date'] + mining_hw['device'].values.tolist())
-	return market_share, new_hw, old_hw, on_again
+	return market_share, new_hw, old_hw, on_again, avg_e_price
 
 def main():
-	mining_hw, btc = prepare_data()
+	mining_hw, btc, break_even = prepare_data()
 	# v Crazy inverse formula to get block count from hash rate reported by blockchain.info v
 	btc['block_count'] = (144 * 600 * 1e12 / 2**32) * (btc['hashrate'] / btc['difficulty'])
 	w = 3 # window for averaging
@@ -130,7 +155,11 @@ def main():
 	btc['revenue'] = btc['price']*((btc['block_count']/24.0)*btc['block_reward'] + btc['tx_fee']/24.0)
 	btc['rev_per_hashrate'] = btc['revenue'] / btc['hashrate']
 	
-	market_share, new_hw, old_hw, on_again = model(btc, mining_hw)
+	market_share, new_hw, old_hw, on_again, avg_e_price = model(btc, mining_hw, break_even)
+	
+	for i in avg_e_price:
+		print("%.3f" % i , end='\t')
+	print()
 	
 	bought = pd.DataFrame(new_hw, columns=['date', 'device', 'hashrate'])
 	b2 = pd.merge(btc[['date', 'rev_per_hashrate']], bought[['date', 'device']])
@@ -176,7 +205,8 @@ def main():
 	print(s2.describe())
 	
 	fig, ax = plt.subplots()
-	ax.hist(s2['prof_price'].values, bins=50)
+	ax.hist(s2['prof_price'].values, bins=100, color='r', alpha=0.5)
+#	ax.hist(b2['prof_price'].values, bins=100, color='g', alpha=0.5)
 	plt.show()
 
 if __name__ == "__main__":
