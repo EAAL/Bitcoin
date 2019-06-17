@@ -40,6 +40,34 @@ def prepare_data():
 		
 	btc = btc.replace({'difficulty': 0}, 1e-12)
 	btc = btc.loc[:, ~btc.columns.duplicated()]
+	
+	# Bitcoin cash prices, hash rates, and transaction fees: From Blockchain.info on 2019-03-19
+	bch_price = pd.read_csv('bch-price.csv', sep=",", skipinitialspace=True, parse_dates=True, names=['date', 'price'])
+
+	bch_hashrate = pd.read_csv('bch-hash-rate.csv', sep=",", skipinitialspace=True, parse_dates=True, names=['date', 'hashrate'])
+	bch_difficulty = pd.read_csv('bch-difficulty.csv', sep=",", skipinitialspace=True, parse_dates=True, names=['date', 'difficulty'])
+
+	mining_hw['release_date'] = mining_hw['release_date'].astype('datetime64[D]')
+	bch_price['date'] = bch_price['date'].astype('datetime64[D]')
+	bch_hashrate['date'] = bch_hashrate['date'].astype('datetime64[D]')
+	bch_difficulty['date'] = btc_difficulty['date'].astype('datetime64[D]')
+
+	# Calculate changes in hash rate
+	bch_hashrate['change'] = bch_hashrate['hashrate'].diff()
+	bch_hashrate['change'] = bch_hashrate['change'].fillna(0.0)
+	
+	# Block rewards in USD per block (halvings are hard-coded)
+	halving = [pd.to_datetime('2012-11-28 00:00:00'), pd.to_datetime('2016-07-09 00:00:00')]
+	conditions = [(bch_price.date < halving[0]),
+	(bch_price.date < halving[1]) & (bch_price.date >= halving[0]),
+	(bch_price.date >= halving[1])]
+	block_rwd = [50.0, 25.0, 12.5]
+	bch_price['block_reward'] = np.select(conditions, block_rwd, default=0.0)
+	
+	bch = pd.concat([bch_price, bch_hashrate, bch_difficulty], axis=1, sort=False, join='inner')
+		
+	bch = bch.replace({'difficulty': 0}, 1e-12)
+	bch = bch.loc[:, ~bch.columns.duplicated()]
 
 	h = np.array(mining_hw['hashrate'].tolist())
 	e = np.array(mining_hw['power_usage'].tolist())
@@ -55,7 +83,7 @@ def prepare_data():
 			tmp.append(d)
 		break_even.append(tmp)
 
-	return mining_hw, btc, break_even
+	return mining_hw, btc, bch, break_even
 
 def model(btc, mining_hw, break_even):
 	bulk_threshold = 10000
@@ -137,7 +165,7 @@ def model(btc, mining_hw, break_even):
 	return market_share, new_hw, old_hw, on_again, avg_e_price
 
 def main():
-	mining_hw, btc, break_even = prepare_data()
+	mining_hw, btc, bch, break_even = prepare_data()
 	# v Crazy inverse formula to get block count from hash rate reported by blockchain.info v
 	btc['block_count'] = (144 * 600 * 1e12 / 2**32) * (btc['hashrate'] / btc['difficulty'])
 	w = 3 # window for averaging
@@ -155,11 +183,21 @@ def main():
 	btc['revenue'] = btc['price']*((btc['block_count']/24.0)*btc['block_reward'] + btc['tx_fee']/24.0)
 	btc['rev_per_hashrate'] = btc['revenue'] / btc['hashrate']
 	
-	market_share, new_hw, old_hw, on_again, avg_e_price = model(btc, mining_hw, break_even)
+	bch['block_count'] = (144 * 600 * 1e12 / 2**32) * (bch['hashrate'] / bch['difficulty'])
+	# BCH Revenue in USD per hour
+	bch['revenue'] = bch['price']*((bch['block_count']/24.0)*bch['block_reward'])
+	bch['rev_per_hashrate'] = bch['revenue'] / bch['hashrate']
 	
-	for i in avg_e_price:
-		print("%.3f" % i , end='\t')
-	print()
+	b = pd.merge(btc[['date', 'rev_per_hashrate', 'change']], bch[['date', 'rev_per_hashrate', 'change']], on='date')
+	btc_to_bch = b[(b['date'] >= pd.to_datetime('2017-08-01')) & (b['rev_per_hashrate_x'] < b['rev_per_hashrate_y']) & (b['change_x'] < 0) & (b['change_y'] > 0)]
+	bch_to_btc = b[(b['date'] >= pd.to_datetime('2017-08-01')) & (b['rev_per_hashrate_x'] > b['rev_per_hashrate_y']) & (b['change_x'] > 0) & (b['change_y'] < 0)]
+	print(btc_to_bch.describe())
+	print(bch_to_btc.describe())
+	return
+	
+	
+	
+	market_share, new_hw, old_hw, on_again, avg_e_price = model(btc, mining_hw, break_even)
 	
 	bought = pd.DataFrame(new_hw, columns=['date', 'device', 'hashrate'])
 	b2 = pd.merge(btc[['date', 'rev_per_hashrate']], bought[['date', 'device']])
@@ -182,33 +220,7 @@ def main():
 	ax.scatter(r2['date'].values, r2['prof_price'].values, c=r2['device'], marker='x', cmap='tab20')
 	ax.legend()
 	plt.show()
-	
-	y = []
-	for i in market_share.loc[:, market_share.columns != 'date'].columns.values:
-		y.append(market_share[i])
-	
-	fig, ax = plt.subplots()
-	ax.set_yscale('linear')
-	ax.set_ylim((0, 0.6e8))
-	ax.stackplot(btc['date'].values, y, labels=market_share.columns[1:].values)
-	ax.plot(btc['date'].values, btc['hashrate'].values, c='b', alpha=0.5)
-	ax2 = ax.twinx()
-	ax2.set_ylim((0, 22000))
-	ax2.set_yscale('linear')
-	ax2.plot(btc['date'].values, btc['price'].values, c='r')
-	plt.show()
-	
-	print('Buying')
-	print(b2['date'].count()/btc['date'].count())
-	print(b2.describe())
-	print('Selling')
-	print(s2['date'].count()/btc['date'].count())
-	print(s2.describe())
-	
-	fig, ax = plt.subplots()
-	ax.hist(s2['prof_price'].values, bins=100, color='r', alpha=0.5)
-#	ax.hist(b2['prof_price'].values, bins=100, color='g', alpha=0.5)
-	plt.show()
+
 
 if __name__ == "__main__":
 	main()
