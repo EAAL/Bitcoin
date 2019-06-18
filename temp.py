@@ -85,8 +85,8 @@ def prepare_data():
 
 	return mining_hw, btc, bch, break_even
 
-def model(btc, mining_hw, break_even):
-	bulk_threshold = 10000
+def model(btc, mining_hw, break_even, btc_to_bch, bch_to_btc):
+	bulk_threshold = 5000
 	ms = []
 	new_hw = []
 	old_hw = []
@@ -111,8 +111,7 @@ def model(btc, mining_hw, break_even):
 				elec_price = avg_e_price[i]
 					
 				if (newest > 0) and (elec_price > 0) and (np.abs(break_even[newest-1][i] / elec_price) < 90):
-					i -= 1
-					continue
+					break
 				if storage[i] - leftover >= 0:
 					if leftover / mining_hw.iloc[i]['hashrate'] > bulk_threshold:
 						on_again.append([row.date, i, leftover])
@@ -149,14 +148,16 @@ def model(btc, mining_hw, break_even):
 					if (-leftover) / mining_hw.iloc[i]['hashrate'] > bulk_threshold:
 						old_hw.append([row.date, i, -leftover])
 					curr_mrkt_shr[i] += leftover
-					avg_e_price[i] = (avg_e_price[i]*storage[i] + elec_price*(-leftover))/(storage[i]-leftover)
+					if not(row.date in btc_to_bch['date'].values):
+						avg_e_price[i] = (avg_e_price[i]*storage[i] + elec_price*(-leftover))/(storage[i]-leftover)
 					storage[i] -= leftover
 					leftover = 0
 				else:
 					if curr_mrkt_shr[i] / mining_hw.iloc[i]['hashrate'] > bulk_threshold:
 						old_hw.append([row.date, i, curr_mrkt_shr[i]])
 					leftover += curr_mrkt_shr[i]
-					avg_e_price[i] = (avg_e_price[i]*storage[i] + elec_price*curr_mrkt_shr[i])/(storage[i]+curr_mrkt_shr[i])
+					if not(row.date in btc_to_bch['date'].values):
+						avg_e_price[i] = (avg_e_price[i]*storage[i] + elec_price*curr_mrkt_shr[i])/(storage[i]+curr_mrkt_shr[i])
 					storage[i] += curr_mrkt_shr[i]
 					curr_mrkt_shr[i] = 0
 					i += 1
@@ -190,35 +191,34 @@ def main():
 	
 	b = pd.merge(btc[['date', 'rev_per_hashrate', 'change']], bch[['date', 'rev_per_hashrate', 'change']], on='date')
 	btc_to_bch = b[(b['date'] >= pd.to_datetime('2017-08-01')) & (b['rev_per_hashrate_x'] < b['rev_per_hashrate_y']) & (b['change_x'] < 0) & (b['change_y'] > 0)]
-	bch_to_btc = b[(b['date'] >= pd.to_datetime('2017-08-01')) & (b['rev_per_hashrate_x'] > b['rev_per_hashrate_y']) & (b['change_x'] > 0) & (b['change_y'] < 0)]
-	print(btc_to_bch.describe())
-	print(bch_to_btc.describe())
-	return
+	bch_to_btc = b[(b['date'] >= pd.to_datetime('2017-08-01')) & (b['rev_per_hashrate_x'] > b['rev_per_hashrate_y']) & (b['change_x'] > 0) & (b['change_y'] < 0)]	
 	
-	
-	
-	market_share, new_hw, old_hw, on_again, avg_e_price = model(btc, mining_hw, break_even)
+	market_share, new_hw, old_hw, on_again, avg_e_price = model(btc, mining_hw, break_even, btc_to_bch, bch_to_btc)
 	
 	bought = pd.DataFrame(new_hw, columns=['date', 'device', 'hashrate'])
 	b2 = pd.merge(btc[['date', 'rev_per_hashrate']], bought[['date', 'device']])
 	b3 = pd.merge(b2[['device']], mining_hw[['power_usage']], how='left', left_on='device', right_index=True)
 	b2['prof_price'] = b2['rev_per_hashrate']/b3['power_usage']
+	buy = b2[~(b2['date'].isin(bch_to_btc['date'].values))]
 	
 	sold = pd.DataFrame(old_hw, columns=['date', 'device', 'hashrate'])
 	s2 = pd.merge(btc[['date', 'rev_per_hashrate']], sold[['date', 'device']])
 	s3 = pd.merge(s2[['device']], mining_hw[['power_usage']], how='left', left_on='device', right_index=True)
 	s2['prof_price'] = s2['rev_per_hashrate']/s3['power_usage']
+	sell = s2[~(s2['date'].isin(btc_to_bch['date'].values))]
 	
-	reuse = pd.DataFrame(on_again, columns=['date', 'device', 'hashrate'])
-	r2 = pd.merge(btc[['date', 'rev_per_hashrate']], reuse[['date', 'device']])
+	reused = pd.DataFrame(on_again, columns=['date', 'device', 'hashrate'])
+	r2 = pd.merge(btc[['date', 'rev_per_hashrate']], reused[['date', 'device']])
 	r3 = pd.merge(r2[['device']], mining_hw[['power_usage']], how='left', left_on='device', right_index=True)
 	r2['prof_price'] = r2['rev_per_hashrate']/r3['power_usage']
+	reuse = r2[~(r2['date'].isin(bch_to_btc['date'].values))]
 	
 	fig, ax = plt.subplots()
-	ax.scatter(s2['date'].values, s2['prof_price'].values, c=s2['device'], marker='v', cmap='tab20')
-	ax.scatter(b2['date'].values, b2['prof_price'].values, c=b2['device'], marker='^', cmap='tab20')
-	ax.scatter(r2['date'].values, r2['prof_price'].values, c=r2['device'], marker='x', cmap='tab20')
-	ax.legend()
+	sc1 = ax.scatter(sell['date'].values, sell['prof_price'].values, c=sell['device'], marker='v', cmap='tab20')
+	sc2 = ax.scatter(buy['date'].values, buy['prof_price'].values, c=buy['device'], marker='^', cmap='tab20')
+	sc3 = ax.scatter(reuse['date'].values, reuse['prof_price'].values, c=reuse['device'], marker='x', cmap='tab20')
+	l1 = ax.legend(*sc2.legend_elements(), loc="upper left", title="Devices")
+	ax.add_artist(l1)
 	plt.show()
 
 

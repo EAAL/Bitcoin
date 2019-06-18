@@ -58,7 +58,7 @@ def prepare_data():
 	return mining_hw, btc, break_even
 
 def model(btc, mining_hw, break_even):
-	bulk_threshold = 10000
+	bulk_threshold = 5000
 	ms = []
 	new_hw = []
 	old_hw = []
@@ -157,10 +157,6 @@ def main():
 	
 	market_share, new_hw, old_hw, on_again, avg_e_price = model(btc, mining_hw, break_even)
 	
-	for i in avg_e_price:
-		print("%.3f" % i , end='\t')
-	print()
-	
 	bought = pd.DataFrame(new_hw, columns=['date', 'device', 'hashrate'])
 	b2 = pd.merge(btc[['date', 'rev_per_hashrate']], bought[['date', 'device']])
 	b3 = pd.merge(b2[['device']], mining_hw[['power_usage']], how='left', left_on='device', right_index=True)
@@ -206,7 +202,7 @@ def main():
 	print(s2.describe())
 	
 	fig, ax = plt.subplots()
-	ax.hist(s2['prof_price'].values, bins=100, color='r', alpha=0.5)
+	ax.hist(s2['prof_price'].values, bins=100, density=True, weights=sold['hashrate'], color='r', alpha=0.5)
 #	ax.hist(b2['prof_price'].values, bins=100, color='g', alpha=0.5)
 	plt.show()
 
