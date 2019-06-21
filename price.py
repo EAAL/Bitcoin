@@ -203,17 +203,6 @@ def main():
 
 	energy_consumption['date'] = energy_consumption['date'].astype('datetime64[D]')
 	
-	y = []
-	j = 0
-	for i in market_share.loc[:, market_share.columns != 'date'].columns.values:
-		y.append(market_share[i]*mining_hw.iloc[j]['power_usage']*24/1000000)
-		j += 1
-	fig, ax = plt.subplots()
-	ax.stackplot(btc['date'].values, y, labels=market_share.columns[1:].values)
-	ax.plot(energy_consumption['date'].values, (energy_consumption['estimated']*1000/365).values)
-	ax.plot(energy_consumption['date'].values, (energy_consumption['minimum']*1000/365).values, color='red')
-	plt.show()
-	
 	bought = pd.DataFrame(new_hw, columns=['date', 'device', 'hashrate'])
 	b2 = pd.merge(btc[['date', 'rev_per_hashrate']], bought[['date', 'device', 'hashrate']])
 	b3 = pd.merge(b2[['device']], mining_hw[['power_usage']], how='left', left_on='device', right_index=True)
@@ -235,34 +224,40 @@ def main():
 	r2['weight'] = r2['hashrate']*r3['power_usage']
 	reuse = r2[~(r2['date'].isin(bch_to_btc['date'].values))]
 	
+	n = len(sell.index)
+	very_high = sell.nlargest(int(n/10), 'prof_price')
+	n = len(buy.index)
+	very_low = buy.nsmallest(int(n/10), 'prof_price')
+	n = len(reuse.index)
+	very_low2 = buy.nsmallest(int(n/10), 'prof_price')
+	
+	future = 7
+	btc['max_drop'] = btc['price'].shift(-future).rolling(future).min().fillna(0) - btc['price']
+	btc['max_hike'] = btc['price'].shift(-future).rolling(future).max().fillna(0) - btc['price']
+	drop = btc[btc['date'].isin(very_high['date'])][['date', 'max_drop']]
+	hike = btc[(btc['date'].isin(very_low['date'])) | (btc['date'].isin(very_low2['date']))][['date', 'max_hike']]
+	
+	res = -(drop['max_drop'].sum()) + hike['max_hike'].sum()
+	print(res)
+	
 	fig, ax = plt.subplots()
-	sc1 = ax.scatter(sell['date'].values, sell['prof_price'].values, c=sell['device'], marker='v', cmap='tab20')
+	ax.hist(drop['max_drop'].values, bins=100, color='r', alpha=0.5)
+	ax.hist(hike['max_hike'].values, bins=100, color='g', alpha=0.5)
+	plt.show()
+	
+	
+	fig, ax = plt.subplots()
+#	ax.scatter(very_low['date'].values, very_low['prof_price'].values)
+	ax.vlines(very_low['date'].values, 0, 0.6, color='green')
+	ax.vlines(very_low2['date'].values, 0, 0.6, color='green')
+	ax.vlines(very_high['date'].values, 0, 0.6, color='red')
+	ax2 = ax.twinx()
+	ax2.plot(btc['date'].values, btc['price'].values)
+#	sc1 = ax.scatter(sell['date'].values, sell['prof_price'].values, c=sell['device'], marker='v', cmap='tab20')
 #	sc2 = ax.scatter(buy['date'].values, buy['prof_price'].values, c=buy['device'], marker='^', cmap='tab20')
 #	sc3 = ax.scatter(reuse['date'].values, reuse['prof_price'].values, c=reuse['device'], marker='x', cmap='tab20')
 #	l1 = ax.legend(*sc2.legend_elements(), loc="upper left", title="Devices")
 #	ax.add_artist(l1)
-	plt.show()
-
-	y = []
-	for i in market_share.loc[:, market_share.columns != 'date'].columns.values:
-		y.append(market_share[i])
-	
-	
-	
-	fig, ax = plt.subplots()
-	ax.set_yscale('log')
-#	ax.set_ylim((0, 0.6e8))
-	ax.stackplot(btc['date'].values, y, labels=market_share.columns[1:].values, cmap='tab20')
-#	ax.plot(btc['date'].values, btc['hashrate'].values, c='b', alpha=0.5)
-#	ax2 = ax.twinx()
-#	ax2.set_ylim((0, 22000))
-#	ax2.set_yscale('linear')
-#	ax2.plot(btc['date'].values, btc['price'].values, c='r')
-	plt.show()
-	
-	fig, ax = plt.subplots()
-	ax.hist(sell['prof_price'].values, bins=100, density=True, weights=sell['weight'], color='r', alpha=0.5)
-#	ax.hist(b2['prof_price'].values, bins=100, color='g', alpha=0.5)
 	plt.show()
 
 
