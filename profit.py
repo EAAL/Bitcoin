@@ -228,24 +228,34 @@ def main():
 	reuse = r2[~(r2['date'].isin(bch_to_btc['date'].values))]
 	
 	fig, ax = plt.subplots()
+	cmap = plt.cm.get_cmap('tab10')
 	ax.set_yscale('linear')
-	
-	for i in range(len(mining_hw.index)):
-		ep = 0.05
-		mask = (btc['date'] >= mining_hw.iloc[i]['release_date'])
-		profit_per_hashrate = ((btc['rev_per_hashrate'] - mining_hw.iloc[i]['power_usage'] * ep) * mining_hw.iloc[i]['hashrate']/mining_hw.iloc[i]['price']) * mask
+	ax.set_yticks([i for i in range(len(mining_hw.index))])
+	ax.set_yticklabels(mining_hw['device'].values)
+	offset = 0.0
+	c = 0
+	lines = []
+	for ep in [0.04, 0.05, 0.08, 0.1, 0.12, 0.2]:
+		for i in range(len(mining_hw.index)):
+			mask = (btc['date'] >= mining_hw.iloc[i]['release_date'])
+			profit_per_hashrate = ((btc['rev_per_hashrate'] - mining_hw.iloc[i]['power_usage'] * ep) * mining_hw.iloc[i]['hashrate']/mining_hw.iloc[i]['price']) * mask
+			
+			tmp = profit_per_hashrate.shift(-1)*profit_per_hashrate
+			
+			toggle = btc[(tmp <= 0) & (btc['date'] > mining_hw.iloc[i]['release_date']) & (btc['price'] > 0)]['date']
+			
+			t = toggle.values
+			t = np.insert(t, 0, mining_hw.iloc[i]['release_date'])
+			if len(t) % 2 == 1:
+				t = np.insert(t, 1, btc.iloc[-1]['date'])
+			#ax.plot(btc['date'].values, (profit_per_hashrate*100).values)
+			l = ax.hlines([i-0.25+offset for j in range(int(len(t)/2))], t[::2], t[1::2], linewidth=3, color=[cmap(c) for j in range(int(len(t)/2))])
+		lines.append(l)
 		
-		tmp = profit_per_hashrate.shift(-1)*profit_per_hashrate
-		
-		toggle = btc[(tmp <= 0) & (btc['date'] > mining_hw.iloc[i]['release_date']) & (btc['price'] > 0)]['date']
-		
-		t = toggle.values
-		t = np.insert(t, 0, mining_hw.iloc[i]['release_date'])
-		if len(t) % 2 == 1:
-			t = np.insert(t, 1, btc.iloc[-1]['date'])
-		ax.plot(btc['date'].values, (profit_per_hashrate*100).values)
-		ax.hlines([i+0.1 for j in range(int(len(t)/2))], t[::2], t[1::2])
-
+		offset += 0.1
+		c += 1
+	ax.grid()
+	ax.legend(lines, ['4¢', '5¢', '8¢', '10¢', '12¢', '20¢'], loc='upper left')
 	plt.show()
 
 if __name__ == "__main__":

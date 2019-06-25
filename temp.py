@@ -24,6 +24,9 @@ def prepare_data():
 	btc_txs['date'] = btc_txs['date'].astype('datetime64[D]')
 	btc_difficulty['date'] = btc_difficulty['date'].astype('datetime64[D]')
 
+	# Delivery delay for Antminers
+	mining_hw.loc['S1':]['release_date'] = mining_hw.loc['S1':]['release_date'] + pd.Timedelta('30 days')
+	
 	# Calculate changes in hash rate
 	btc_hashrate['change'] = btc_hashrate['hashrate'].diff()
 	btc_hashrate['change'] = btc_hashrate['change'].fillna(0.0)
@@ -81,7 +84,7 @@ def prepare_data():
 		for j in range(i):
 			d = int(price[i]*h[j]/((e[j]-e[i])*24))
 			tmp.append(d)
-			#print(d, end=" ")
+			#print(d/0.05, end=" ")
 		#print()
 		break_even.append(tmp)
 	
@@ -112,7 +115,7 @@ def model(btc, mining_hw, break_even, btc_to_bch, bch_to_btc):
 				
 				elec_price = avg_e_price[i]
 					
-				if (newest > 0) and (elec_price > 0) and ((np.abs(break_even[newest-1][i] / elec_price) < 90) or (row.rev_per_hashrate / mining_hw.iloc[i]['power_usage'] > elec_price)):
+				if (newest > 0) and (elec_price > 0) and ((np.abs(break_even[newest-1][i] / elec_price) < 180) or (row.rev_per_hashrate / mining_hw.iloc[i]['power_usage'] > elec_price)):
 					break
 				if storage[i] - leftover >= 0:
 					if leftover / mining_hw.iloc[i]['hashrate'] > bulk_threshold:
@@ -209,9 +212,13 @@ def main():
 		y.append(market_share[i]*mining_hw.iloc[j]['power_usage']*24/1000000)
 		j += 1
 	fig, ax = plt.subplots()
+	ax.set_yscale('log')
 	ax.stackplot(btc['date'].values, y, labels=market_share.columns[1:].values)
 	ax.plot(energy_consumption['date'].values, (energy_consumption['estimated']*1000/365).values)
 	ax.plot(energy_consumption['date'].values, (energy_consumption['minimum']*1000/365).values, color='red')
+	ax.set_ylabel('Energy Consumption (GWh)')
+	ax.grid()
+	ax.legend(loc='upper left')
 	plt.show()
 	
 	bought = pd.DataFrame(new_hw, columns=['date', 'device', 'hashrate'])
@@ -227,6 +234,7 @@ def main():
 	s2['prof_price'] = s2['rev_per_hashrate']/s3['power_usage']
 	s2['weight'] = s2['hashrate']*s3['power_usage']
 	sell = s2[~(s2['date'].isin(btc_to_bch['date'].values))]
+	print(sell['weight'].sum())
 	
 	reused = pd.DataFrame(on_again, columns=['date', 'device', 'hashrate'])
 	r2 = pd.merge(btc[['date', 'rev_per_hashrate']], reused[['date', 'device', 'hashrate']])
@@ -258,11 +266,18 @@ def main():
 #	ax2.set_ylim((0, 22000))
 #	ax2.set_yscale('linear')
 #	ax2.plot(btc['date'].values, btc['price'].values, c='r')
+	ax.set_ylabel('Hash Rate (TH/s)')
+	ax.grid()
+	ax.legend(loc='upper left')
 	plt.show()
 	
 	fig, ax = plt.subplots()
-	ax.hist(sell['prof_price'].values, bins=100, density=True, weights=sell['weight'], color='r', alpha=0.5)
+	ax.set_yscale('linear')
+	ax.hist(sell['prof_price'].values, bins=100, density=False, weights=sell['weight']/1000, color='r', alpha=0.5)
 #	ax.hist(b2['prof_price'].values, bins=100, color='g', alpha=0.5)
+	ax.set_ylabel('Power (MW)')
+	ax.set_xlabel('Electricity Price (USD)')
+	ax.grid()
 	plt.show()
 
 
