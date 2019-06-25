@@ -202,6 +202,9 @@ def main():
 	
 	market_share, new_hw, old_hw, on_again, avg_e_price = model(btc, mining_hw, break_even, btc_to_bch, bch_to_btc)
 	
+	print("Total investment in USD:")
+	print(((market_share.loc[:, market_share.columns != 'date'].max().to_frame().T) * (mining_hw['price']/mining_hw['hashrate']).values).sum(axis=1))
+	
 	energy_consumption = pd.read_csv('bitcoin-energy-consumption.csv', sep=",", skipinitialspace=True, parse_dates=True, names=['date', 'estimated', 'minimum'])
 
 	energy_consumption['date'] = energy_consumption['date'].astype('datetime64[D]')
